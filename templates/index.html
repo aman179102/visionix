@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local Text-to-Image (CPU) + Improve Prompt</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Local-first AI Text-to-Image</h1>
+      <p class="sub">Stable Diffusion v1.5 (CPU) + Gemini Prompt Improver</p>
+    </header>
+
+    <section class="panel">
+      <label class="label" for="prompt">Prompt</label>
+      <textarea id="prompt" placeholder="Describe what you want to generate..."></textarea>
+
+      <div class="row">
+        <div class="field">
+          <label class="label" for="style">Style</label>
+          <select id="style">
+            {% for s in styles %}
+              <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="label" for="mode">Mode</label>
+          <select id="mode">
+            {% for m in modes %}
+              <option value="{{ m }}" {% if m == default_mode %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field grow"></div>
+      </div>
+
+      <div class="actions">
+        <button id="improveBtn" class="btn secondary">Improve Prompt</button>
+        <button id="generateBtn" class="btn primary">Generate Image</button>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="row">
+          <div class="field">
+            <label class="label" for="steps">Steps (default 12, max 20)</label>
+            <input id="steps" type="number" min="1" max="20" value="12" />
+          </div>
+          <div class="field">
+            <label class="label" for="guidance">Guidance Scale (max 7.5)</label>
+            <input id="guidance" type="number" min="1" max="7.5" step="0.1" value="7.0" />
+          </div>
+        </div>
+      </details>
+
+      <div id="status" class="status" aria-live="polite"></div>
+
+      <div id="spinner" class="spinner hidden" role="status" aria-label="Loading"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Result</h2>
+      <div class="result">
+        <img id="resultImg" alt="Generated image will appear here" />
+      </div>
+      <div class="actions">
+        <a id="downloadLink" class="btn" download="generation.png" href="#" aria-disabled="true">Download</a>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Last 5 Generations</h2>
+      <div id="recent" class="recent"></div>
+    </section>
+  </div>
+
+<script>
+  const promptEl = document.getElementById('prompt');
+  const styleEl = document.getElementById('style');
+  const modeEl = document.getElementById('mode');
+  const stepsEl = document.getElementById('steps');
+  const guidanceEl = document.getElementById('guidance');
+  const improveBtn = document.getElementById('improveBtn');
+  const generateBtn = document.getElementById('generateBtn');
+  const spinner = document.getElementById('spinner');
+  const statusEl = document.getElementById('status');
+  const resultImg = document.getElementById('resultImg');
+  const downloadLink = document.getElementById('downloadLink');
+  const recentEl = document.getElementById('recent');
+
+  let lastBlobUrl = null;
+
+  function setLoading(isLoading, message) {
+    spinner.classList.toggle('hidden', !isLoading);
+    improveBtn.disabled = isLoading;
+    generateBtn.disabled = isLoading;
+    statusEl.textContent = message || '';
+  }
+
+  function setDownload(blobUrl) {
+    if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+    lastBlobUrl = blobUrl;
+
+    if (!blobUrl) {
+      downloadLink.href = '#';
+      downloadLink.setAttribute('aria-disabled', 'true');
+      downloadLink.classList.add('disabled');
+      return;
+    }
+
+    downloadLink.href = blobUrl;
+    downloadLink.setAttribute('aria-disabled', 'false');
+    downloadLink.classList.remove('disabled');
+  }
+
+  async function refreshRecent() {
+    const r = await fetch('/recent');
+    const items = await r.json();
+
+    recentEl.innerHTML = '';
+    if (!items.length) {
+      recentEl.innerHTML = '<div class="muted">No generations yet.</div>';
+      return;
+    }
+
+    for (const it of items) {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const img = document.createElement('img');
+      img.src = it.data_url;
+      img.alt = it.prompt;
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${it.style} • steps ${it.steps}`;
+
+      const text = document.createElement('div');
+      text.className = 'promptText';
+      text.textContent = it.prompt;
+
+      card.appendChild(img);
+      card.appendChild(meta);
+      card.appendChild(text);
+
+      recentEl.appendChild(card);
+    }
+  }
+
+  improveBtn.addEventListener('click', async () => {
+    const prompt = (promptEl.value || '').trim();
+    const style = styleEl.value;
+
+    if (!prompt) {
+      statusEl.textContent = 'Please enter a prompt first.';
+      return;
+    }
+
+    try {
+      setLoading(true, 'Improving prompt...');
+      const r = await fetch('/improve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt, style})
+      });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || 'Improve failed');
+      }
+
+      const data = await r.json();
+      promptEl.value = data.improved_prompt;
+      statusEl.textContent = 'Prompt improved.';
+    } catch (e) {
+      statusEl.textContent = e.message;
+    } finally {
+      setLoading(false, '');
+    }
+  });
+
+  generateBtn.addEventListener('click', async () => {
+    const prompt = (promptEl.value || '').trim();
+    const style = styleEl.value;
+    const mode = modeEl.value;
+    const steps = Number(stepsEl.value || 12);
+    const guidance_scale = Number(guidanceEl.value || 7.0);
+
+    if (!prompt) {
+      statusEl.textContent = 'Please enter a prompt first.';
+      return;
+    }
+
+    try {
+      setLoading(true, 'Generating image on CPU (this can take a while)...');
+      setDownload(null);
+
+      const r = await fetch('/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt, style, mode, steps, guidance_scale})
+      });
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || 'Generation failed');
+      }
+
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      resultImg.src = url;
+      setDownload(url);
+
+      statusEl.textContent = 'Done.';
+      await refreshRecent();
+    } catch (e) {
+      statusEl.textContent = e.message;
+    } finally {
+      setLoading(false, '');
+    }
+  });
+
+  refreshRecent();
+</script>
+</body>
+</html>
