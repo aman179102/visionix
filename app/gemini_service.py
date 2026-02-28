@@ -4,7 +4,6 @@ import os
 
 import google.generativeai as genai
 
-
 SYSTEM_INSTRUCTION = (
     "You are an expert Stable Diffusion prompt engineer. "
     "Your job is to rewrite user ideas into Stable Diffusion v1.5 optimized prompts. "

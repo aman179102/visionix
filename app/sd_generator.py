@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+
 import torch
 from diffusers import StableDiffusionPipeline
 from PIL import Image

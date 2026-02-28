@@ -106,7 +106,7 @@ templates/
   index.html
 static/
   style.css
-.env
+.env.example
 requirements.txt
-.gitignore
+
 ```
