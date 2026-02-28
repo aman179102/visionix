@@ -1,4 +1,5 @@
-# Local-first AI Text-to-Image (CPU) + Improve Prompt
+# Visionix
+## Local-first AI Text-to-Image (CPU) + Improve Prompt
 
 A lightweight local-first web app that generates images with **Stable Diffusion v1.5 (CPU-only)** and improves prompts via the **Gemini API (server-side)**.
 
